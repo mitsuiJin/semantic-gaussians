@@ -1,7 +1,7 @@
 scene:
-  scene_path: "/data/shjin1019/datasets/scannet_processed/scene0073_03"
-  test_cameras: True
-  colmap_images: "color" #images
+  scene_path: "/local_datasets/mipnerf360/bicycle"
+  test_cameras: False
+  colmap_images: "images"
   colmap_eval_hold: 8
   downscale_ratio: 1
   white_background: False
@@ -15,19 +15,19 @@ pipeline:
 
 model:
   sh_degree: 3
-  model_dir: ~
+  model_dir: "/data/shjin1019/semantic-gaussians/output/bicycle"
   load_iteration: -1
   device: "cuda:0"
   random_init: False
 
 train:
-  exp_name: "scene0073_03_rgb_train"
+  exp_name: "bicycle_mipnerf360"
   iterations: 30000
   num_workers: 8
   test_iterations: [100, 7000, 30000]
   save_iterations: [7000, 30000]
   checkpoint_iterations: []
-  cut_edge: True  # If ScanNet, set True to cut the 1% black edge
+  cut_edge: False
 
   position_lr_init: 0.00016
   position_lr_final: 0.0000016
@@ -39,9 +39,9 @@ train:
   rotation_lr: 0.001
   percent_dense: 0.01
   lambda_dssim: 0.2
-  densification_interval: 100 # 1000 # 100 # 2000
-  opacity_reset_interval: 3000 #2000 # 3000 # 2000
+  densification_interval: 100
+  opacity_reset_interval: 3000
   densify_from_iter: 500
-  densify_until_iter: 15000 # 10000 # 15000 #10000
+  densify_until_iter: 15000
   densify_grad_threshold: 0.0002
   random_background: False

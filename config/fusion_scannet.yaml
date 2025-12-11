@@ -1,11 +1,11 @@
 scene:
-  scene_path: "/PATH/TO/YOUR/OWN"
-  dataset_name: "cocomap"
+  scene_path: "/local_datasets/shjin1019/scannet_fixed/scene0073_03" #"/PATH/TO/YOUR/OWN"
+  dataset_name: "scannet20" #"cocomap"
   test_cameras: False
-  colmap_images: "images"
+  colmap_images: "color" #"images"
   colmap_eval_hold: 8
   downscale_ratio: 1
-  white_background: False
+  white_background: True #False
   device: "cuda:0"
   
 pipeline:
@@ -16,19 +16,19 @@ pipeline:
 
 model:
   sh_degree: 3
-  model_dir: "/PATH/TO/YOUR/OWN"
+  model_dir: "/data/shjin1019/repos/semantic-gaussians/output/scene0073_03_rgb_train" #"/PATH/TO/YOUR/OWN"
   dynamic: False
-  load_iteration: -1
+  load_iteration: 7000 #-1 #30000
   device: "cuda:0"
 
 fusion:
   img_dim: [648, 484]
   num_workers: 8
-  model_2d: openseg # choose from openseg, lseg, samclip, vlpart
+  model_2d: lseg #samclip # choose from openseg, lseg, samclip, vlpart
   depth: render # choose from image, render, surface, none
   depth_scale: 1000.0
   visibility_threshold: 0.05
   cut_boundary: 10
   n_split_points: 999999999 # train: 80000, eval: 999999999 (large enough)
   num_rand_file_per_scene: 1 # train: 5, eval: 1
-  out_dir: "/PATH/TO/YOUR/OWN"
+  out_dir: "/data/shjin1019/repos/datasets/scannet_fused/scene0073_03_7k" #"/PATH/TO/YOUR/OWN"

@@ -89,7 +89,7 @@ class SensorData:
         print("exporting", len(self.frames) // frame_skip, " depth frames to", output_path)
         for f in range(0, len(self.frames), frame_skip):
             depth_data = self.frames[f].decompress_depth(self.depth_compression_type)
-            depth = np.fromstring(depth_data, dtype=np.uint16).reshape(self.depth_height, self.depth_width)
+            depth = np.frombuffer(depth_data, dtype=np.uint16).reshape(self.depth_height, self.depth_width)
             if image_size is not None:
                 depth = cv2.resize(
                     depth,

@@ -26,14 +26,27 @@ class FeatureDataset(Dataset):
     ):
         self.aug = aug
         self.feature_type = feature_type
-        self.scenes = os.listdir(gaussians_dir)
+        
+        # [수정 1] gaussians_dir 안에 있는 것 중 '폴더'만 가져오기 (config.yaml 같은 파일 무시)
+        all_items = os.listdir(gaussians_dir)
+        self.scenes = [d for d in all_items if os.path.isdir(os.path.join(gaussians_dir, d))]
         self.scenes.sort()
 
         self.data = []
         for scene in self.scenes:
-            features = os.listdir(os.path.join(point_dir, scene))
+            # [수정 2] 해당 씬의 Fusion 결과 폴더가 실제로 존재하는지 확인 (안전장치)
+            scene_fusion_path = os.path.join(point_dir, scene)
+            if not os.path.isdir(scene_fusion_path):
+                print(f"[Warning] Skipping scene '{scene}': Fusion result not found at {scene_fusion_path}")
+                continue
+
+            features = os.listdir(scene_fusion_path)
             features.sort()
             for feature in features:
+                # .pt 파일이 아닌 것이 섞여 있을 경우를 대비해 확장자 체크 (선택 사항이지만 안전함)
+                if not feature.endswith('.pt'):
+                    continue
+
                 ply_path = os.path.join(
                     gaussians_dir,
                     scene,
@@ -43,6 +56,8 @@ class FeatureDataset(Dataset):
                 )
                 feature_path = os.path.join(point_dir, scene, feature)
                 self.data.append([ply_path, feature_path, 0])
+
+        print(f"[Dataset] Loaded {len(self.data)} data items from {len(self.scenes)} scenes.")
 
         self.voxelizer = Voxelizer(
             voxel_size=voxel_size,

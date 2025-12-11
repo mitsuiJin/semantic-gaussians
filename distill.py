@@ -18,6 +18,8 @@ from model.render_utils import get_text_features
 from model.openseg_predictor import OpenSeg
 from dataset.feature_dataset import FeatureDataset
 
+from sklearn.neighbors import NearestNeighbors  # [추가] 점 개수 맞추기용
+from utils.dataset_utils import load_gaussian_ply  # [추가] 원본 점 로드용
 import MinkowskiEngine as ME
 
 
@@ -90,7 +92,7 @@ def distill(config):
     )
 
     ema_loss_for_log = 0.0
-    eval(config, model_3d, model_2d, dataset.voxelizer, -1)
+    #eval(config, model_3d, model_2d, dataset.voxelizer, -1)
 
     progress_bar = tqdm(
         range(config.distill.epochs * len(loader)),
@@ -100,6 +102,8 @@ def distill(config):
 
     for i in range(config.distill.epochs):
         for j, batch in enumerate(loader):
+            # [추가] 루프 시작할 때마다 GPU 캐시 비우기 (이 한 줄이면 됩니다!)
+            torch.cuda.empty_cache()
             locs, features, features_gt, mask, head_id = batch
             locs[:, 1:4] += (torch.rand(3) * 100).type_as(locs)
 
@@ -144,7 +148,66 @@ def distill(config):
             iteration_path = os.path.join(config.distill.model_dir, f"weights/{i+1}")
             os.makedirs(iteration_path, exist_ok=True)
             torch.save(model_3d.state_dict(), os.path.join(iteration_path, "model.pth"))
+    # [여기서부터 추가] ========================================================
+    print("\n>>> Training Finished. Starting Inference & Devoxelization...")
+    
+    # 1. 저장 경로 설정 (weights/100 폴더 안에 저장)
+    save_dir = os.path.join(config.distill.model_dir, "distilled_results", config.distill.exp_name, "weights", "100")
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, "predictions.pt")
+    
+    # 2. 모델 평가 모드 전환
+    model_3d.eval()
+    
+    with torch.no_grad():
+        # 3. 원본 포인트 클라우드(PLY) 읽기 (점 개수를 맞추기 위해 필수!)
+        # dataset.data[0][0]에는 첫 번째 씬의 ply 경로가 들어있습니다.
+        ply_path = dataset.data[0][0]
+        print(f">>> Loading Original PLY from: {ply_path}")
+        original_locs, _ = load_gaussian_ply(ply_path, "all") # (N_points, 3)
+        
+        # 4. 데이터셋에서 데이터 가져오기
+        # (학습 때 썼던 dataset 변수를 그대로 쓰므로 경로 에러 없음)
+        locs, feats, _, mask_chunk, _ = dataset[0]
+        
+        # [수정됨] 이미 Tensor이므로 from_numpy 제거 & 차원 맞춤
+        # locs는 (N, 4) 형태이며 첫 컬럼이 1로 되어있음 -> 0으로 변경
+        b_coords = locs.int()
+        b_coords[:, 0] = 0
+        feats = feats.float()
+        
+        # 5. 모델 추론 (결과는 압축된 복셀 단위)
+        in_field = ME.SparseTensor(features=feats.cuda(), coordinates=b_coords.cuda())
+        out_field = model_3d(in_field)
+        
+        voxel_preds = out_field.features.cpu().numpy() # (M_voxels, Dim)
+        # 좌표 복원 (Voxel Size 곱해주기)
+        voxel_coords = out_field.C[:, 1:].cpu().numpy() * config.distill.voxel_size
+        
+        print(f">>> Voxel count: {voxel_preds.shape[0]}, Target Point count: {mask_chunk.sum()}")
 
+        # 6. [핵심] 복셀 -> 원본 포인트 매핑 (KNN)
+        # 뷰어 에러(Illegal Memory Access)를 막기 위해, 복셀 값을 원본 점 개수에 맞춰 늘려줍니다.
+        target_mask = mask_chunk.bool().cpu().numpy()
+        target_locs = original_locs[target_mask] # 마스킹된 원본 점들
+        
+        print(">>> Running KNN mapping (Devoxelization)...")
+        nbrs = NearestNeighbors(n_neighbors=1, algorithm='kd_tree').fit(voxel_coords)
+        _, indices = nbrs.kneighbors(target_locs)
+        
+        # 매핑된 피처 생성 (이제 개수가 딱 맞습니다!)
+        point_preds = voxel_preds[indices.flatten()]
+        
+        # 7. 최종 저장
+        torch.save(
+            {
+                "feat": torch.from_numpy(point_preds).half().cuda(),
+                "mask_full": mask_chunk.cuda()
+            },
+            save_path
+        )
+        print(f">>> Save Complete! File: {save_path}")
+    # ==========================================================================
     progress_bar.close()
 
 

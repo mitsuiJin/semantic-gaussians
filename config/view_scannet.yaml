@@ -1,8 +1,8 @@
 scene:
-  scene_path: "/PATH/TO/YOUR/OWN"
-  dataset_name: "cocomap"
+  scene_path: "/data/shjin1019/datasets/scannet_processed/scene0073_03" #"/PATH/TO/YOUR/OWN"
+  dataset_name: "scannet20" #"cocomap"
   test_cameras: False
-  colmap_images: "images"
+  colmap_images: "color" #"images"
   colmap_eval_hold: 8
   downscale_ratio: 1
   white_background: False
@@ -16,11 +16,11 @@ pipeline:
 
 model:
   sh_degree: 3
-  model_dir: "/PATH/TO/YOUR/OWN"
+  model_dir: "/data/shjin1019/repos/semantic-gaussians/output/scene0073_03_rgb_train" #"/PATH/TO/YOUR/OWN"
   dynamic: False
-  load_iteration: -1
+  load_iteration: 7000 #-1
   device: "cuda:0"
 
 render:
-  fusion_dir: "/PATH/TO/YOUR/OWN/*.pt"
-  model_2d: openseg # choose from openseg, lseg, samclip, vlpart
+  fusion_dir: "/data/shjin1019/repos/datasets/scannet_fused/scene0073_03_7k/0.pt" #"/data/shjin1019/repos/datasets/scannet_fused/scene0073_03/0.pt" #"/PATH/TO/YOUR/OWN/*.pt"
+  model_2d: lseg #openseg # choose from openseg, lseg, samclip, vlpart
