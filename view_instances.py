@@ -1,7 +1,7 @@
 # python view_instances.py \
 #   --ply_path "/data/shjin1019/repos/semantic-gaussians/output/scene0073_03_rgb_train/point_cloud/iteration_7000/point_cloud.ply" \
-#   --npy_path "instance_ids_7k.npy" \
-#   --json_path "scene_graph_nodes_7k_2.json"
+#   --npy_path "instance_ids_convexhull.npy" \
+#   --json_path "scene_graph_nodes_convexhull.json"
 
 
 import viser
@@ -11,6 +11,7 @@ import os
 import json
 import time
 from plyfile import PlyData
+from scipy.spatial import ConvexHull
 
 def load_ply_xyz(path):
     print(f"Loading PLY from {path}...")
@@ -22,90 +23,123 @@ def load_ply_xyz(path):
 
 def get_random_colors(n):
     np.random.seed(42)
-    return np.random.randint(0, 255, size=(n, 3))
+    return np.random.randint(50, 255, size=(n, 3)) # 너무 어두운 색 제외
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ply_path", type=str, required=True, help="Path to point_cloud.ply")
     parser.add_argument("--npy_path", type=str, required=True, help="Path to instance_ids.npy")
-    # JSON 경로는 필수가 아닌 선택으로 둡니다 (없으면 점만 보여줌)
     parser.add_argument("--json_path", type=str, default=None, help="Path to scene_graph_nodes.json")
     args = parser.parse_args()
 
+    # Viser 서버 시작
     server = viser.ViserServer()
     print("Viser Server started!")
 
-    # 1. Geometry & Instance IDs 로드 (점군 시각화용)
-    xyz = load_ply_xyz(args.ply_path)
+    # 1. 원본 데이터 로드 (Convex Hull 계산용)
+    xyz_full = load_ply_xyz(args.ply_path)
     instance_ids = np.load(args.npy_path)
     
-    print(f"Total points: {len(xyz)}")
+    print(f"Total points: {len(xyz_full)}")
     print(f"Clustered points: {np.sum(instance_ids != -1)}")
 
-    # 색상 입히기 (배경: 회색)
-    colors = np.full_like(xyz, 200, dtype=np.uint8)
+    # 색상 배열 생성
+    colors_full = np.full_like(xyz_full, 200, dtype=np.uint8) 
     
     max_id = instance_ids.max()
+    palette = None
+    
     if max_id >= 0:
         palette = get_random_colors(max_id + 1)
         mask = (instance_ids != -1)
-        colors[mask] = palette[instance_ids[mask]]
+        colors_full[mask] = palette[instance_ids[mask]]
 
-    # 다운샘플링 (뷰어 성능 최적화)
-    if len(xyz) > 1000000:
-        print("Downsampling for viewer performance...")
-        choice = np.random.choice(len(xyz), 1000000, replace=False)
-        xyz = xyz[choice]
-        colors = colors[choice]
+    # 2. 시각화용 다운샘플링
+    xyz_vis = xyz_full
+    colors_vis = colors_full
+    
+    MAX_SHOW_POINTS = 1000000
+    if len(xyz_full) > MAX_SHOW_POINTS:
+        print(f"Downsampling for viewer performance ({len(xyz_full)} -> {MAX_SHOW_POINTS})...")
+        choice = np.random.choice(len(xyz_full), MAX_SHOW_POINTS, replace=False)
+        xyz_vis = xyz_full[choice]
+        colors_vis = colors_full[choice]
 
     # [Viser] 점군 추가
-    server.add_point_cloud(
+    server.scene.add_point_cloud(
         "/colored_instances",
-        points=xyz,
-        colors=colors,
+        points=xyz_vis,
+        colors=colors_vis,
         point_size=0.01
     )
     
-    # 2. Bounding Box 로드 및 시각화 (JSON이 제공된 경우)
+    # 3. 3D Convex Hull (Real Shape) 계산 및 시각화
     if args.json_path and os.path.exists(args.json_path):
-        print(f"Loading BBoxes from {args.json_path}...")
+        print("Calculating 3D Convex Hulls from FULL point cloud...")
         with open(args.json_path, 'r') as f:
             scene_nodes = json.load(f)
             
-        # 박스 색상 (라벨별)
-        label_colors = {}
-        base_colors = get_random_colors(20) # 20개 정도 랜덤 컬러 미리 생성
-
-        for i, node in enumerate(scene_nodes):
+        for node in scene_nodes:
+            node_id = node['id']
             label = node['label']
-            if label not in label_colors:
-                label_colors[label] = base_colors[len(label_colors) % 20]
             
-            # AABB 계산 (Min/Max -> Center/Dims)
-            min_pt = np.array(node['bbox_min'])
-            max_pt = np.array(node['bbox_max'])
-            center = (min_pt + max_pt) / 2
-            dimensions = max_pt - min_pt
+            # 해당 인스턴스의 점들 추출 (다운샘플링 안 된 'xyz_full' 사용)
+            instance_mask = (instance_ids == node_id)
+            points_3d = xyz_full[instance_mask]
             
-            # [Viser] 박스 추가 (가장 단순하고 안전한 API 사용)
-            server.add_box(
-                name=f"/objects/{node['id']}_{label}_box",
-                position=center,
-                dimensions=dimensions,
-                color=label_colors[label],
-                visible=True
-                # wireframe=True 옵션이 있다면 좋지만, 에러가 나면 solid box로 보임
-            )
+            if len(points_3d) < 4:
+                continue
             
-            # [Viser] 라벨 추가
-            server.add_label(
-                name=f"/objects/{node['id']}_{label}_text",
-                text=f"{label} ({node['id']})",
-                position=max_pt
-            )
-        print("BBoxes added successfully.")
+            # 인스턴스 색상 가져오기
+            if palette is not None:
+                instance_color = palette[node_id]
+            else:
+                instance_color = np.array([255, 255, 255])
+
+            try:
+                # 3D Convex Hull 계산
+                hull = ConvexHull(points_3d)
+                
+                # Hull의 엣지(선분) 추출
+                segments = []
+                for simplex in hull.simplices:
+                    # 삼각형의 세 변을 선분으로 추가
+                    p0 = points_3d[simplex[0]]
+                    p1 = points_3d[simplex[1]]
+                    p2 = points_3d[simplex[2]]
+                    
+                    # (Start, End) 쌍으로 저장
+                    segments.append([p0, p1])
+                    segments.append([p1, p2])
+                    segments.append([p2, p0])
+                
+                segments = np.array(segments) # Shape: (N_edges, 2, 3)
+                
+                # [수정됨] 단일 색상 전달 (배열 생성 X)
+                # colors 인자에 (3,) 형태를 넣으면 모든 선분에 적용됨
+                server.scene.add_line_segments(
+                    name=f"/objects/{node_id}_{label}_hull",
+                    points=segments,
+                    colors=instance_color, 
+                    line_width=2.0, 
+                )
+                
+                # 라벨 추가
+                center = points_3d.mean(axis=0)
+                server.scene.add_label(
+                    name=f"/objects/{node_id}_{label}_text",
+                    text=f"{label}",
+                    position=center
+                )
+                
+            except Exception as e:
+                # 에러 발생 시 원인 출력 (디버깅용)
+                print(f"[Error] Failed to draw hull for {label} ({node_id}): {e}")
+                continue
+            
+        print("3D Convex Hulls added successfully.")
     else:
-        print("No JSON path provided or file not found. Skipping BBox visualization.")
+        print("No JSON path provided. Skipping Hull visualization.")
     
     print("Visualization Ready! Open the URL provided above.")
     

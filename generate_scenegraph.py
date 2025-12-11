@@ -6,9 +6,10 @@ import torch
 import numpy as np
 import os
 import argparse
-import gc  # 메모리 관리를 위해 가비지 컬렉터 사용
+import gc
 from plyfile import PlyData
 from sklearn.cluster import DBSCAN
+from scipy.spatial import ConvexHull  # [추가] 실제 모양 계산용
 import json
 from tqdm import tqdm
 
@@ -86,8 +87,7 @@ def main():
         class_name = LABELS[label_idx]
         
         # (선택 사항) 배경은 인스턴스 분할에서 제외하고 싶다면 주석 해제
-        # if class_name in ["wall", "floor"]: continue
-        if class_name in ["wall"]: continue # wall은 포인트 수가 많아서 생략
+        if class_name in ["wall", "floor"]: continue
             
         # 현재 클래스에 해당하는 점들의 인덱스 마스크
         mask = (point_labels == label_idx)
@@ -143,7 +143,32 @@ def main():
             valid_indices = current_indices[instance_mask]
             global_instance_ids[valid_indices] = global_id_counter
             
-            # Scene Graph 노드 정보 생성
+            # [핵심 추가] 2D Footprint (Convex Hull) 계산
+            # XY 평면 투영 점들
+            points_2d = instance_points[:, :2]
+            footprint = []
+            try:
+                # 점이 3개 이상이어야 Hull 계산 가능
+                if len(points_2d) >= 3:
+                    hull = ConvexHull(points_2d)
+                    # Hull의 외곽선 좌표 순서대로 저장
+                    footprint = points_2d[hull.vertices].tolist()
+                else:
+                    # 점이 너무 적으면 그냥 BBox 사용
+                    min_xy = points_2d.min(axis=0)
+                    max_xy = points_2d.max(axis=0)
+                    footprint = [
+                        [min_xy[0], min_xy[1]],
+                        [max_xy[0], min_xy[1]],
+                        [max_xy[0], max_xy[1]],
+                        [min_xy[0], max_xy[1]]
+                    ]
+            except Exception:
+                 # 일직선 등 예외 발생 시 BBox로 대체
+                 min_xy = points_2d.min(axis=0)
+                 max_xy = points_2d.max(axis=0)
+                 footprint = [[min_xy[0], min_xy[1]], [max_xy[0], max_xy[1]]]
+
             node = {
                 "id": global_id_counter,
                 "label": class_name,
@@ -151,23 +176,21 @@ def main():
                 "centroid": instance_points.mean(axis=0).tolist(),
                 "bbox_min": instance_points.min(axis=0).tolist(),
                 "bbox_max": instance_points.max(axis=0).tolist(),
-                "point_count": int(len(instance_points))
+                "point_count": int(len(instance_points)),
+                "footprint": footprint  # [추가됨] 실제 바닥 모양 다각형
             }
             scene_nodes.append(node)
             global_id_counter += 1
 
-    # 5. 결과 저장
-    # (1) Scene Graph 노드 리스트 (JSON)
-    output_json = "scene_graph_nodes_7k_2.json"
+    # 결과 저장
+    output_json = "scene_graph_nodes_convexhull.json"
+    output_npy = "instance_ids_convexhull.npy"
+    
     with open(output_json, "w") as f:
         json.dump(scene_nodes, f, indent=4)
-        
-    # (2) [추가됨] 인스턴스 ID 맵 (NPY) -> 시각화용
-    output_npy = "instance_ids_7k.npy"
     np.save(output_npy, global_instance_ids)
         
-    print(f"Done! Found {len(scene_nodes)} objects.")
-    print(f"Saved to {output_json} and {output_npy}")
+    print(f"Done! Saved with Footprint data to {output_json}")
 
 if __name__ == "__main__":
     main()
