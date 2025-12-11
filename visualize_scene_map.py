@@ -6,7 +6,7 @@ import argparse
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=str, default="scene_graph_final.json")
+    parser.add_argument("--input", type=str, default="scene_graph_sparse.json")
     args = parser.parse_args()
 
     with open(args.input, 'r') as f:
