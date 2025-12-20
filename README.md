@@ -1,177 +1,124 @@
-# Semantic Gaussians: Open-Vocabulary Scene Understanding with 3D Gaussian Splatting
+# Context-aware Gaussian Splatting Editor
 
-<p align="left">
-    <a href='https://arxiv.org/pdf/2403.15624.pdf'>
-      <img src='https://img.shields.io/badge/Paper-PDF-red?style=plastic&logo=adobeacrobatreader&logoColor=red' alt='Paper PDF'>
-    </a>
-    <a href='https://arxiv.org/abs/2403.15624'>
-      <img src='https://img.shields.io/badge/Paper-arXiv-green?style=plastic&logo=arXiv&logoColor=green' alt='Paper arXiv'>
-    </a>
-    <a href='https://semantic-gaussians.github.io/'>
-      <img src='https://img.shields.io/badge/Project-Page-blue?style=plastic&logo=Google%20chrome&logoColor=blue' alt='Project Page'>
-    </a>
-</p>
+> **Proactive 3D Scene Editing via Structural Reasoning**
 
-This repository is the official implemetation of the paper "[Semantic Gaussians: Open-Vocabulary Scene Understanding with 3D Gaussian Splatting](https://arxiv.org/abs/2403.15624)".
+**Context-aware Gaussian Splatting Editor** is a novel pipeline that extends **3D Gaussian Splatting (3DGS)** to enable intelligent, context-aware scene editing.
 
-<div align=center>
-<img src='./assets/teaser.png' width=80%>
-</div>
+While **3DGS** has revolutionized 3D reconstruction and synthesis, current editing approaches heavily rely on **manual text prompts** (e.g., *"Remove the chair"*). This creates several limitations:
+1.  **Lack of Context:** Edits are performed in isolation without considering the scene's semantic context or spatial layout.
+2.  **Prompt Dependency:** The quality of editing depends heavily on the user's ability to craft precise prompts.
+3.  **Inefficiency:** Users must manually input commands for every single change, which is tedious for complex scene rearrangements.
 
-## Abstract
+**Our Solution:** We propose a **Context-aware Recommendation System**. Instead of waiting for commands, our system constructs a **Scene Graph**, analyzes the spatial context via **LLM**, and **proactively suggests** edits (e.g., *"The chair is blocking the door. Should I move it?"*). The user simply accepts or rejects the suggestion.
 
-Open-vocabulary 3D scene understanding presents a significant challenge in computer vision, with wide-ranging applications in embodied agents and augmented reality systems. Previous approaches have adopted Neural Radiance Fields (NeRFs) to analyze 3D scenes. In this paper, we introduce Semantic Gaussians, a novel open-vocabulary scene understanding approach based on 3D Gaussian Splatting. Our key idea is distilling pretrained 2D semantics into 3D Gaussians. We design a versatile projection approach that maps various 2D semantic features from pretrained image encoders into a novel semantic component of 3D Gaussians, without the additional training required by NeRFs. We further build a 3D semantic network that directly predicts the semantic component from raw 3D Gaussians for fast inference. We explore several applications of Semantic Gaussians: semantic segmentation on ScanNet-20, where our approach attains a 9.3\% mIoU and 6.5\% mAcc improvement over prior open-vocabulary scene understanding counterparts; object part segmentation, scene editing, and spatial-temporal segmentation with better qualitative results over 2D and 3D baselines, highlighting its versatility and effectiveness on supporting diverse downstream tasks.
+![Pipeline Overview](assets/pipeline_overview.png)
 
-## Prerequisites
+---
 
-This code has been tested on Ubuntu 22.04 and NVIDIA RTX 4090. We recommend to use Linux and an NVIDIA GPU with ≥ 16GB VRAM. This repository may support Windows machines but it was not evaluated. It cannot support MacOS system as it requires CUDA.
+## 🌟 Key Contributions
 
-## Install
+### 1. Context-aware Recommendation Engine
+Moving away from passive "Instruction-following," we introduce an active **"Scene Diagnosis"** system.
+* **Problem:** Manual prompting is slow and requires users to identify all necessary changes themselves.
+* **Solution:** We utilize an **LLM (GPT-4)** to reason about the scene based on a **Semantic Scene Graph**. The system identifies clutter, obstacles, or misplacements and generates a list of "Recommended Edits" automatically.
 
-1. Clone our repository (remember to add the `--recursive` argument to clone submodules).
+### 2. Geometry-based Instance Segmentation (DBSCAN)
+To enable object-level reasoning in static 3DGS scenes without relying on heavy video-based trackers (like DEVA), we implemented a geometry-centric segmentation approach.
+* **Method:** We perform **DBSCAN clustering** directly on the **Raw Semantic Features** and spatial coordinates (`xyz`) of the 3D Gaussians.
+* **Benefit:** This efficiently separates physically disjoint instances (e.g., distinguishing multiple chairs) purely via post-processing, providing the granular object data required for the Scene Graph.
 
-    ```bash
-    git clone https://github.com/sharinka0715/semantic-gaussians --recursive
-    cd semantic-gaussians
-    ```
+### 3. Semantic Scene Graph Construction
+We structure the unstructured point cloud into a logical graph to facilitate LLM reasoning.
+* **Adaptive Thresholding:** We apply dynamic distance thresholds proportional to object scale to robustly capture relationships between large furniture while filtering noise.
+* **Rich Context Generation:** The graph is translated into natural language descriptions (e.g., *"A is on B"*, *"C is near D"*), allowing the LLM to understand the physical layout of the room.
 
-2. Create individual virtual environment (or use existing environments with CUDA Development kit and corresponding version of PyTorch).
-    ```bash
-    conda env create -f environment.yaml
-    conda activate sega
-    ```
+---
 
-3. Install additional dependencies with pip as many of them need to be compiled.
-    ```bash
-    pip install -r requirements.txt
-    ```
+## 🛠️ Installation
 
-4. Compile and install MinkowskiEngine through anaconda, recommending to install through [official instructions](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation).
-    ```bash
-    # Here is an example only for Anaconda, CUDA 11.x
-    conda install openblas-devel -c anaconda
-    pip install git+https://github.com/NVIDIA/MinkowskiEngine -v --no-deps --install-option="--blas_include_dirs=${CONDA_PREFIX}/include" --install-option="--blas=openblas"
-    ```
+This project requires a standard Python environment with PyTorch and Gaussian Splatting dependencies.
 
-## Prepare Dataset and Pretrained 2D Models
-
-### Data structure
-
-This repository supports three formats of dataset for 3D Gaussians Splatting:
-* Blender format
-    ```
-    scene_name
-    |-- images/
-    |-- points3d.ply
-    |-- transforms_train.json
-    ```
-* COLMAP format
-    ```
-    scene_name
-    |-- images/
-    |-- sparse/
-    |   |-- 0
-    |   |   |-- cameras.bin
-    |   |   |-- points3D.bin
-    ```
-* ScanNet format
-    ```
-    scene_name
-    |-- color/
-    |-- intrnsic/
-    |-- pose/
-    |-- points3d.ply
-    ```
-Blender and COLMAP formats are originally supported by 3D Gaussian Splatting and many NeRF-based works. You can easily prepare your dataset as these two format.
-
-The ScanNet dataset can be extracted by `tools/scannet_sens_reader.py`. You can also use `tools/unzip_lable_filt.py` to extract ground truth semantic labels in ScanNet-20 dataset.
 ```bash
-# An example used for experiments in paper
-python tools/scannet_sens/reader.py --input_path /PATH/TO/YOUR/scene0000_00 --output_path /PATH/TO/YOUR/OUTPUT/scene0000_00
+# 1. Clone the repository
+git clone [https://github.com/your-username/Context-aware-Gaussian-Splatting-Editor.git](https://github.com/your-username/Context-aware-Gaussian-Splatting-Editor.git)
+cd Context-aware-Gaussian-Splatting-Editor
+
+# 2. Create Conda environment
+conda create -n sega python=3.9
+conda activate sega
+
+# 3. Install dependencies
+# Basic requirements for Gaussian Splatting & Semantic Gaussians
+pip install torch torchvision
+pip install plyfile shapely openai matplotlib scikit-learn
+pip install viser # For visualization
 ```
 
-### Datasets Used in Paper
-| Dataset Name | Download Link | Format |
-|----|----|----|
-| ScanNet | [Official GitHub link](https://github.com/ScanNet/ScanNet) | ScanNet (need pre-process) |
-| MVImgNet | [Official GitHub link](https://github.com/GAP-LAB-CUHK-SZ/MVImgNet) | COLMAP |
-| CMU Panoptic | [Official Page](http://domedb.perception.cs.cmu.edu/), [Dynamic 3D Gaussians Page](https://dynamic3dgaussians.github.io/) | Other (need pre-process) |
-| Mip-NeRF 360 | [Official Project Page](https://jonbarron.info/mipnerf360/) | COLMAP |
+## 🚀 Workflow & Usage
 
-### Pretrained 2D Vision-Language Models
+The pipeline consists of three main stages: **Instance Extraction**, **Graph Generation**, and **Interactive Editing**.
 
-You should put these downloaded pretrained checkpoints under the `./weight/` folder, or you can modify the saving path in YAML configs.
+### Step 1: Instance Segmentation
 
-| Model Name | Checkpoint | Download Link |
-|----|----|----|
-| CLIP | ViT-L/14@336px | Automatically download by `openai/CLIP` |
-| OpenSeg | Default | [Google Drive](https://drive.google.com/file/d/1DgyH-1124Mo8p6IUJ-ikAiwVZDDfteak/view), [Official Repo](https://github.com/tensorflow/tpu/tree/master/models/official/detection/projects/openseg)
-| LSeg | Model for Demo | [Google Drive](https://drive.google.com/file/d/1FTuHY1xPUkM-5gaDtMfgCl3D0gR89WV7/view?usp=sharing), [Official Repo](https://github.com/isl-org/lang-seg)
-| SAM | ViT-H | [Direct Link](https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth), [Official Repo](https://github.com/facebookresearch/segment-anything?tab=readme-ov-file#model-checkpoints)
-| VLPart | Swin-Base | [Direct Link](https://github.com/Cheems-Seminar/grounded-segment-any-parts/releases/download/v1.0/swinbase_part_0a0000.pth), [Grounded Segment Any Parts Repo](https://github.com/Cheems-Seminar/grounded-segment-any-parts?tab=readme-ov-file#model-checkpoints)
+Perform DBSCAN clustering on the fused point cloud to generate instance masks.
 
-## Usage
-
-This repository has 4 entries to start a program. Every entry has its corresponding config YAML file. You only need to run `python xxx.py`, all configs are in YAML files.
-
-* `train.py`: Train normal RGB gaussians. Code mainly from 3D Gaussian Splatting official repository.
-    
-    config: `config/official_train.yaml`.
-    
-    This will output 3D Gaussians under `output/` folder.
-
-* `fusion.py`: Apply 2D versatile projection.
-    
-    config: `config/fusion_scannet.yaml`.
-
-    This will output fused features under `config.fusion.out_dir`
-
-* `distill.py`: Train 3D semantic network.
-    
-    config: `config/distill_scannet.yaml`.
-
-    This will output 3D semantic network checkpoints in `results_distlll/` folder.
-
-* `eval_segmentation.py`: Evaluate the semantic segmentation performance on ScanNet dataset.
-    
-    config: `config/eval.yaml`.
-
-    This will print the evaluation results on the screen.
-
-* `view_viser.py`: View the semantic Gaussians. Need 2D projected results (*.pt) and original RGB Gaussians.
-    
-    config: `config/view_scannet.yaml`.
-
-    This will open a web service supported by [viser](https://github.com/nerfstudio-project/viser).
-
-## Acknowledgements
-
-We appreciate the works below as this repository is heavily based on them:
-
-[[SIGGRAPH 2023] 3D Gaussian Splatting for Real-Time Radiance Field Rendering](https://github.com/graphdeco-inria/gaussian-splatting)
-
-[[CVPR 2023] OpenScene: 3D Scene Understanding with Open Vocabularies](https://github.com/pengsongyou/openscene)
-
-[[ECCV 2022] OpenSeg: Scaling Open-Vocabulary Image Segmentation with Image-Level Labels](https://github.com/tensorflow/tpu/blob/master/models/official/detection/projects/openseg/)
-
-[[Cheems Seminar] Grounded Segment Anything: From Objects to Parts](https://github.com/Cheems-Seminar/grounded-segment-any-parts)
-
-
-## News
-
-- [2024.07] We fix some dependency problems in our code. Add LSeg modules.
-
-- [2024.05] We release our initial version of implemetation.
-
-## Citation
-
-```bibtex
-@misc{guo2024semantic,
-    title={Semantic Gaussians: Open-Vocabulary Scene Understanding with 3D Gaussian Splatting}, 
-    author={Jun Guo and Xiaojian Ma and Yue Fan and Huaping Liu and Qing Li},
-    year={2024},
-    eprint={2403.15624},
-    archivePrefix={arXiv},
-    primaryClass={cs.CV}
-  }
+```bash
+# Extract instances from 'fusion' results (Raw Features)
+python extract_instances.py \
+    --input_ply output/room_0/point_cloud/iteration_30000/point_cloud.ply \
+    --output_npy instance_ids.npy
 ```
+### Step 2: Scene Graph Generation
+
+Construct a Semantic scene graph using adaptive thresholds
+```bash
+python generate_relationships_improved.py \
+    --input_json scene_graph_nodes_convexhull.json \
+    --output_json scene_graph_Semantic.json
+```
+**Output:** `scene_graph_Semantic.json` (Contains nodes with bounding boxes and filtered relationships) 
+
+### Step 3: Interactive Auto-Editing (Core)
+
+Run the interactive editor. You can choose between **Manual LLM Mode** (Copy-paste prompt to ChatGPT) or **Rule-based Mode**.
+
+```bash
+python interactive_editor_free.py \
+    --scene_graph scene_graph_Semantic.json \
+    --input_ply output/room_0/point_cloud/iteration_30000/point_cloud.ply \
+    --instance_ids instance_ids.npy \
+    --output_ply scene_edited.ply
+```
+
+### Step 4: Visualizationㄴ
+
+Verify the editing results using a Viser-based viewer.
+```bash
+# Visualize the edited scene
+python view_viser.py \
+    --config config/view_scannet.yaml \
+    model.model_dir=output/room_0 \
+    model.load_iteration=30000
+```
+(Note: Ensure the viewer points to the directory containing your `scene_edited.ply`) 
+
+## 📂 File Structure
+
+| File Name | Description |
+| :--- | :--- |
+| `extract_instances.py` | Performs **DBSCAN clustering** on raw fusion features to generate `instance_ids.npy`. |
+| `generate_relationships.py` | Generates the **Semantic Scene Graph** using adaptive thresholds and priority filtering. |
+| `interactive_editor_free.py` | Main engine for **Rich Context Generation** and **Editing (Remove/Move)**. Supports LLM prompts and rule-based logic. |
+| `view_instances.py` | Visualizes the 3D point cloud colored by **Instance IDs** to verify the DBSCAN segmentation results. |
+| `view_viser.py` | The main renderer for visualizing 3D Gaussian Splatting results. |                                                    |
+
+## 🙏 Acknowledgements
+
+This project is built upon the excellent work of:
+
+* [Semantic Gaussians](https://www.google.com/url?sa=E&source=gmail&q=https://github.com/SegGroup/Semantic-Gaussians&authuser=1) : Provided the foundation for 3D Semantic Segmentation.
+* [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) : The core rendering technology.
+
+## 📝 License
+
+This project follows the license of the original Gaussian Splatting repositories.
