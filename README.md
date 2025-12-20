@@ -108,7 +108,7 @@ python view_viser.py \
 | :--- | :--- |
 | `extract_instances.py` | Performs **DBSCAN clustering** on raw fusion features to generate `instance_ids.npy`. |
 | `generate_relationships.py` | Generates the **Semantic Scene Graph** using adaptive thresholds and priority filtering. |
-| `interactive_editor_free.py` | Main engine for **Rich Context Generation** and **Editing (Remove/Move)**. Supports LLM prompts and rule-based logic. |
+| `llm_scene_editor.py` | Main engine for **Rich Context Generation** and **Editing (Remove/Move)**. Supports LLM prompts and rule-based logic. |
 | `view_instances.py` | Visualizes the 3D point cloud colored by **Instance IDs** to verify the DBSCAN segmentation results. |
 | `view_viser.py` | The main renderer for visualizing 3D Gaussian Splatting results. |                                                    |
 
